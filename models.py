@@ -1,71 +1,55 @@
-from pymongo import MongoClient
-from bson import ObjectId
-import gridfs
+import logging
 import os
-from dotenv import load_dotenv
+from io import BytesIO
+import re
+from telegram import Update
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    ContextTypes, ConversationHandler, filters
+)
+from pymongo import MongoClient
+from datetime import datetime
 
-load_dotenv()
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-class MongoDB:
+# Conversation states
+WAITING_FOR_PHOTO, WAITING_FOR_TEXT, WAITING_FOR_SEARCH = range(3)
+
+# Get token from environment variable
+BOT_TOKEN = os.getenv('BOT_TOKEN', "8226242752:AAFRhCf-3zcrhKpTs0vSOyCTB77pKIw8NYc")
+MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
+
+class MongoDBStorage:
     def __init__(self):
-        try:
-            mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
-            database_name = os.getenv('DATABASE_NAME', 'avto_bot_db')
-            
-            self.client = MongoClient(mongodb_uri)
-            self.db = self.client[database_name]
-            self.fs = gridfs.GridFS(self.db)
-            self.records = self.db.records
-            print("✅ Connected to MongoDB successfully!")
-            
-        except Exception as e:
-            print(f"❌ MongoDB connection failed: {e}")
-            self.client = None
-            self.memory_storage = []
-    
+        self.client = MongoClient(MONGODB_URI)
+        self.db = self.client.avto_bot_db
+        self.collection = self.db.records
+        print("✅ MongoDB connected successfully")
+
     def save_record(self, file_data, text_data):
-        if self.client:
-            # Store image in GridFS
-            filename = f"{text_data}_{ObjectId()}.jpg"
-            file_id = self.fs.put(file_data, filename=filename)
-            
-            # Store metadata
-            document = {
-                'file_id': file_id,
-                'text_data': text_data,
-                'filename': filename
-            }
-            
-            result = self.records.insert_one(document)
-            return True
-        else:
-            # Fallback to memory storage
-            document = {
-                'file_data': file_data,
-                'text_data': text_data
-            }
-            self.memory_storage.append(document)
-            return True
-    
+        normalized_text = self.normalize_text(text_data)
+        
+        document = {
+            'image_data': file_data,
+            'text_data': text_data,
+            'normalized_text': normalized_text,
+            'created_at': datetime.now()
+        }
+        
+        result = self.collection.insert_one(document)
+        print(f"✅ Պահպանվեց համարանիշը: '{text_data}'")
+        return True
+
+    def normalize_text(self, text):
+        return ' '.join(text.strip().upper().split())
+
     def search_record(self, search_text):
-        if self.client:
-            # Search for exact match
-            result = self.records.find_one({'text_data': search_text})
-            return result
-        else:
-            # Memory search
-            for doc in self.memory_storage:
-                if doc['text_data'] == search_text:
-                    return doc
-            return None
-    
-    def get_image_file(self, file_id):
-        if self.client:
-            return self.fs.get(file_id)
-        else:
-            # For memory storage, we don't have file_id, so return the first match
-            return None
-    
-    def close(self):
-        if self.client:
-            self.client.close()
+        normalized_search = self.normalize_text(search_text)
+        return self.collection.find_one({'normalized_text': normalized_search})
+
+# ... (rest of your bot class remains the same) ...

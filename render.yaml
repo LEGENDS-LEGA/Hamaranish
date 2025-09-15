@@ -1,0 +1,13 @@
+services:
+  - type: worker
+    name: telegram-avto-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 8226242752:AAFRhCf-3zcrhKpTs0vSOyCTB77pKIw8NYc
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
